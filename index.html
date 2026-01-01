@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Nebula Cosmos · 星云知识宇宙 v3.6</title>
+  <title>Nebula Cosmos · 星云知识宇宙 v3.7</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    /* 样式完全保留 */
+    /* 样式部分完全保留 */
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       background: #020617;
@@ -38,7 +38,6 @@
     .node { transition: opacity 0.4s; }
     .node text { fill: #cbd5e1; font-size: 11px; pointer-events: none; text-anchor: middle; }
     
-    /* 搜索匹配中心光晕 */
     .node.center-match circle { stroke: #fff; stroke-width: 2px; filter: drop-shadow(0 0 10px #38bdf8); }
 
     #detail-panel {
@@ -81,15 +80,15 @@
       </div>
 
       <div class="panel">
-        <h2>🔍 检索与关联高亮</h2>
+        <h2>🔍 检索与时间筛选</h2>
         <div style="display:flex; gap:8px; margin-bottom:10px;">
           <input type="text" id="searchInput" placeholder="搜索星球...">
           <button class="btn" style="background:#334155; color:white;" id="searchBtn">搜索</button>
           <button class="btn" style="background:rgba(255,255,255,0.1); color:white;" id="resetBtn">还原</button>
         </div>
         <div class="form-group">
-          <label>年份筛选</label>
-          <select id="yearFilter"><option value="all">显示全部</option></select>
+          <label>完读时间筛选 (月份)</label>
+          <select id="timeFilter"><option value="all">显示全部月份</option></select>
         </div>
         <div id="searchList" style="max-height:50px; overflow-y:auto; font-size:0.75rem; color:#38bdf8;"></div>
       </div>
@@ -133,9 +132,11 @@
         return str.split(/[\/／]/).map(s => s.trim()).filter(s => s !== "");
       },
 
-      getNodes() {
+      // 修改：支持传入 filteredItems
+      getNodes(data) {
         const nodes = [];
-        this.items.forEach(d => {
+        const targetData = data || this.items;
+        targetData.forEach(d => {
           if(!nodes.find(n => n.id === d.title)) nodes.push({id: d.title, label: d.title, type: 'book', raw: d});
           if(!nodes.find(n => n.id === d.author)) nodes.push({id: d.author, label: d.author, type: 'author'});
           if(d.country && !nodes.find(n => n.id === d.country)) nodes.push({id: d.country, label: d.country, type: 'country'});
@@ -150,9 +151,10 @@
         });
         return nodes;
       },
-      getLinks() {
+      getLinks(data) {
         const links = [];
-        this.items.forEach(d => {
+        const targetData = data || this.items;
+        targetData.forEach(d => {
           links.push({source: d.title, target: d.author, color: '#0ea5e9'});
           if(d.country) links.push({source: d.author, target: d.country, color: '#10b981'});
           this.splitStr(d.theme).forEach(t => links.push({source: d.title, target: 'theme-' + t, color: '#a855f7'}));
@@ -169,10 +171,11 @@
 
     let simulation, nodeElements, linkElements;
 
-    function render() {
+    // 修改：支持传入特定数据集进行渲染
+    function render(data) {
       container.selectAll("*").remove();
-      const nodes = store.getNodes();
-      const links = store.getLinks();
+      const nodes = store.getNodes(data);
+      const links = store.getLinks(data);
       const width = svg.node().clientWidth, height = svg.node().clientHeight;
 
       simulation = d3.forceSimulation(nodes)
@@ -208,7 +211,8 @@
         nodeElements.attr("transform", d => `translate(${d.x},${d.y})`);
       });
 
-      updateUIControls(nodes);
+      // 只有在全量渲染时才更新下拉列表和建议云，避免筛选时列表变动
+      if(!data) updateUIControls(nodes);
     }
 
     function updateUIControls(nodes) {
@@ -216,9 +220,22 @@
       document.getElementById('themeCloud').innerHTML = themeList.map(t => `<span class="pill" onclick="quickFill('theme','${t}')">${t}</span>`).join('');
       const tagList = [...new Set(nodes.filter(n => n.type === 'tag').map(n => n.label))];
       document.getElementById('tagCloud').innerHTML = tagList.map(t => `<span class="pill" onclick="quickFill('keywords','${t}')">${t}</span>`).join('');
-      const years = [...new Set(store.items.map(i => i.readMonth?.split('-')[0]).filter(y => y))].sort().reverse();
-      document.getElementById('yearFilter').innerHTML = '<option value="all">显示全部</option>' + years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+      
+      // 更新时间筛选下拉框（显示年月）
+      const months = [...new Set(store.items.map(i => i.readMonth).filter(m => m))].sort().reverse();
+      document.getElementById('timeFilter').innerHTML = '<option value="all">显示全部月份</option>' + months.map(m => `<option value="${m}">${m}</option>`).join('');
     }
+
+    // 新增：时间筛选事件监听
+    document.getElementById('timeFilter').onchange = (e) => {
+      const selected = e.target.value;
+      if(selected === "all") {
+        render();
+      } else {
+        const filtered = store.items.filter(item => item.readMonth === selected);
+        render(filtered);
+      }
+    };
 
     window.quickFill = (id, val) => {
       const el = document.getElementById(id);
@@ -227,48 +244,27 @@
       else if(!curr.split('/').map(s=>s.trim()).includes(val)) el.value = curr + ' / ' + val;
     };
 
-    // --- 核心修改：关联高亮检索逻辑 ---
     document.getElementById('searchBtn').onclick = () => {
       const val = document.getElementById('searchInput').value.trim().toLowerCase();
       if(!val) return;
-
       const matchedNodeIds = new Set();
       const relatedNodeIds = new Set();
-      const relatedLinkIds = new Set();
-
-      // 1. 找到直接匹配的中心节点
       const nodes = store.getNodes();
-      nodes.forEach(n => {
-        if(n.label.toLowerCase().includes(val)) matchedNodeIds.add(n.id);
-      });
-
-      // 2. 找到所有关联的节点和线
+      nodes.forEach(n => { if(n.label.toLowerCase().includes(val)) matchedNodeIds.add(n.id); });
       const links = store.getLinks();
       links.forEach(l => {
         const s = l.source.id || l.source;
         const t = l.target.id || l.target;
-        if(matchedNodeIds.has(s) || matchedNodeIds.has(t)) {
-          relatedNodeIds.add(s);
-          relatedNodeIds.add(t);
-          relatedLinkIds.add(l); // 标记此连线需要高亮
-        }
+        if(matchedNodeIds.has(s) || matchedNodeIds.has(t)) { relatedNodeIds.add(s); relatedNodeIds.add(t); }
       });
-
-      // 3. 执行视觉高亮
-      nodeElements.style("opacity", d => (matchedNodeIds.has(d.id) || relatedNodeIds.has(d.id)) ? 1 : 0.05)
-                  .classed("center-match", d => matchedNodeIds.has(d.id));
-      
+      nodeElements.style("opacity", d => (matchedNodeIds.has(d.id) || relatedNodeIds.has(d.id)) ? 1 : 0.05).classed("center-match", d => matchedNodeIds.has(d.id));
       linkElements.style("stroke-opacity", d => {
-          const s = d.source.id || d.source;
-          const t = d.target.id || d.target;
+          const s = d.source.id || d.source; const t = d.target.id || d.target;
           return (matchedNodeIds.has(s) || matchedNodeIds.has(t)) ? 0.6 : 0.02;
       }).style("stroke-width", d => {
-          const s = d.source.id || d.source;
-          const t = d.target.id || d.target;
+          const s = d.source.id || d.source; const t = d.target.id || d.target;
           return (matchedNodeIds.has(s) || matchedNodeIds.has(t)) ? "3px" : "1.5px";
       });
-
-      // 4. 更新搜索结果列表
       const results = nodes.filter(n => matchedNodeIds.has(n.id));
       document.getElementById('searchList').innerHTML = results.map(n => `<div onclick="focusNode('${n.id}')" style="cursor:pointer; padding:3px;">✨ ${n.label}</div>`).join('');
     };
@@ -276,9 +272,11 @@
     document.getElementById('resetBtn').onclick = () => {
       document.getElementById('searchInput').value = "";
       document.getElementById('searchList').innerHTML = "";
+      document.getElementById('timeFilter').value = "all"; // 重置筛选器
       nodeElements.style("opacity", 1).classed("center-match", false);
       linkElements.style("stroke-opacity", 0.25).style("stroke-width", "1.5px");
       svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
+      render(); // 恢复全量显示
     };
 
     window.focusNode = (id) => {
