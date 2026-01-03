@@ -15,7 +15,6 @@
     
     .dashboard { display: grid; grid-template-columns: 350px 1fr 350px; grid-template-rows: 150px 1fr; gap: 15px; height: 100%; width: 100%; }
     
-    /* 年度总结卡片 - 风格统一 */
     .summary-card {
       grid-column: 1 / -1;
       background: var(--panel-bg); backdrop-filter: blur(15px);
@@ -25,7 +24,6 @@
     }
     .summary-left h1 { font-size: 1.6rem; color: var(--accent); margin-bottom: 10px; }
     
-    /* 下拉选择器样式 */
     .year-picker {
       background: #1e293b; color: #ffffff; border: 1px solid var(--accent);
       padding: 6px 15px; border-radius: 8px; font-size: 1rem; cursor: pointer;
@@ -87,69 +85,41 @@
   const rawData = JSON.parse(localStorage.getItem('nebula_v3_data')) || [];
   let charts = {};
 
-  // 工具函数：从 "2023年7月" 格式提取年份和月份
+  // 日期解析函数
   function parseChineseDate(dateStr) {
     if (!dateStr) return null;
-    
-    // 匹配 "2023年7月" 或 "2023年07月" 格式
     const match = dateStr.match(/(\d{4})年(\d{1,2})月/);
     if (match) {
       const year = match[1];
-      const month = match[2].padStart(2, '0'); // 补零，如 7 -> 07
-      return {
-        year: year,
-        month: month,
-        yearMonth: `${year}-${month}` // 标准格式
-      };
+      const month = match[2].padStart(2, '0');
+      return { year, month, yearMonth: `${year}-${month}` };
     }
-    
-    // 如果已经是 YYYY-MM 格式
     if (dateStr.match(/^\d{4}-\d{2}$/)) {
       const [year, month] = dateStr.split('-');
-      return {
-        year: year,
-        month: month,
-        yearMonth: dateStr
-      };
+      return { year, month, yearMonth: dateStr };
     }
-    
     return null;
   }
 
-  // 1. 自动识别数据中的年度并填充选择器
+  // 初始化年份选择器
   function initYearSelector() {
-    console.log('初始化年份选择器，数据总量:', rawData.length);
-    
-    // 提取所有有效的阅读年份
     const yearsSet = new Set();
     rawData.forEach(d => {
       if (d.readMonth) {
         const parsed = parseChineseDate(d.readMonth);
-        if (parsed) {
-          console.log('解析日期:', d.readMonth, '->', parsed);
-          yearsSet.add(parsed.year);
-        } else {
-          console.log('无法解析的日期格式:', d.readMonth);
-        }
+        if (parsed) yearsSet.add(parsed.year);
       }
     });
     
-    // 转换为数组并排序
     let years = Array.from(yearsSet);
     if (years.length === 0) {
-      const currentYear = new Date().getFullYear().toString();
-      console.log('未找到阅读年份，使用当前年份:', currentYear);
-      years.push(currentYear);
+      years.push(new Date().getFullYear().toString());
     }
     
-    // 降序排序
     years.sort((a, b) => parseInt(b) - parseInt(a));
-    console.log('可选的年份列表:', years);
     
     const select = document.getElementById('yearSelect');
     select.innerHTML = '';
-    
-    // 添加选项
     years.forEach(y => {
       const opt = document.createElement('option');
       opt.value = y;
@@ -157,327 +127,150 @@
       select.appendChild(opt);
     });
     
-    // 设置默认选中第一个
-    if (years.length > 0) {
-      select.value = years[0];
-    }
+    if (years.length > 0) select.value = years[0];
   }
 
-  // 2. 核心：年度气泡图 (X:月份, Y:国家)
+  // 初始化气泡图
   function initBubbleChart() {
     const dom = document.getElementById('bubbleChart');
-    if (charts.bubble) {
-      charts.bubble.dispose();
-    }
+    if (charts.bubble) charts.bubble.dispose();
     
     const chart = echarts.init(dom);
     const selectedYear = document.getElementById('yearSelect').value;
     
-    console.log(`正在生成 ${selectedYear} 年的气泡图...`);
-    
-    // 提取当前年度的数据
     const yearData = rawData.filter(d => {
       if (!d.readMonth) return false;
       const parsed = parseChineseDate(d.readMonth);
       return parsed && parsed.year === selectedYear;
     });
     
-    console.log(`${selectedYear} 年的阅读记录数:`, yearData.length);
-    
-    // 如果没有数据，显示提示信息
     if (yearData.length === 0) {
-      console.warn(`${selectedYear} 年没有阅读数据`);
       chart.setOption({
         title: {
           text: `${selectedYear} 年暂无阅读数据`,
           left: 'center',
           top: 'center',
-          textStyle: {
-            color: '#94a3b8',
-            fontSize: 16,
-            fontWeight: 'normal'
-          }
-        },
-        graphic: {
-          type: 'text',
-          left: 'center',
-          top: 'middle',
-          style: {
-            text: '请选择其他年份',
-            fontSize: 14,
-            fill: '#64748b'
-          }
+          textStyle: { color: '#94a3b8', fontSize: 16 }
         }
       });
       charts.bubble = chart;
       return;
     }
     
-    // 提取所有国家/地区
     const countries = [...new Set(yearData.map(d => d.country || '其他'))];
-    const months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+    const months = ['01','02','03','04','05','06','07','08','09','10','11','12'];
     
-    console.log('涉及国家/地区:', countries);
-    console.log('涉及月份数:', months.length);
-    
-    // 统计数据: [月份索引, 国家索引, 数量]
     const bubbleMap = {};
     yearData.forEach(d => {
-      if (!d.readMonth) return;
-      
       const parsed = parseChineseDate(d.readMonth);
       if (!parsed) return;
-      
       const month = parsed.month;
       const country = d.country || '其他';
       const key = `${month}-${country}`;
-      
       bubbleMap[key] = (bubbleMap[key] || 0) + 1;
     });
     
-    console.log('气泡图统计数据:', bubbleMap);
-    
-    // 准备最终数据
     const finalData = [];
     Object.keys(bubbleMap).forEach(key => {
       const [month, country] = key.split('-');
       const count = bubbleMap[key];
-      
       const monthIndex = months.indexOf(month);
       const countryIndex = countries.indexOf(country);
-      
       if (monthIndex !== -1 && countryIndex !== -1) {
         finalData.push([monthIndex, countryIndex, count]);
       }
     });
     
-    console.log('最终气泡数据:', finalData);
-    
-    // 设置图表选项
-    const option = {
-      grid: {
-        left: '12%',
-        right: '5%',
-        top: '10%',
-        bottom: '12%',
-        containLabel: true
-      },
+    chart.setOption({
+      grid: { left: '12%', right: '5%', top: '10%', bottom: '12%' },
       xAxis: {
         type: 'category',
         data: months.map(m => m + '月'),
-        axisLabel: {
-          color: '#94a3b8',
-          fontSize: 12
-        },
-        axisLine: {
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
-        },
-        splitLine: {
-          show: true,
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.05)'
-          }
-        },
-        name: '月份',
-        nameTextStyle: {
-          color: '#94a3b8',
-          fontSize: 12
-        }
+        axisLabel: { color: '#94a3b8' },
+        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
       },
       yAxis: {
         type: 'category',
         data: countries,
-        axisLabel: {
-          color: '#f1f5f9',
-          fontSize: 12
-        },
-        axisLine: {
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
-        },
-        splitLine: {
-          show: true,
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.05)'
-          }
-        },
-        name: '国家/地区',
-        nameTextStyle: {
-          color: '#94a3b8',
-          fontSize: 12
-        }
+        axisLabel: { color: '#f1f5f9' },
+        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } }
       },
       tooltip: {
         trigger: 'item',
-        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+        backgroundColor: 'rgba(15,23,42,0.9)',
         borderColor: '#38bdf8',
-        textStyle: {
-          color: '#fff'
-        },
-        formatter: function(params) {
-          const data = params.data;
-          if (!data) return '';
-          const month = months[data[0]] + '月';
-          const country = countries[data[1]];
-          const count = data[2];
-          return `<div style="font-size: 12px;">
-                    <div>${country}</div>
-                    <div>${month}</div>
-                    <div style="color: #38bdf8; font-weight: bold; margin-top: 4px;">${count} 本</div>
-                  </div>`;
-        }
+        textStyle: { color: '#fff' }
       },
       series: [{
         type: 'scatter',
         data: finalData,
-        symbolSize: function(val) {
-          // 根据数量计算气泡大小，确保最小可见
-          const size = Math.sqrt(val[2]) * 25;
-          return Math.max(size, 25); // 最小25像素
-        },
+        symbolSize: (val) => Math.max(Math.sqrt(val[2]) * 25, 25),
         itemStyle: {
           color: new echarts.graphic.RadialGradient(0.4, 0.3, 1, [
             { offset: 0, color: '#38bdf8' },
-            { offset: 0.7, color: '#2563eb' },
             { offset: 1, color: '#1d4ed8' }
           ]),
-          opacity: 0.8,
           borderColor: '#fff',
-          borderWidth: 1,
-          shadowBlur: 10,
-          shadowColor: 'rgba(56, 189, 248, 0.5)'
-        },
-        emphasis: {
-          itemStyle: {
-            opacity: 1,
-            shadowBlur: 15,
-            shadowColor: 'rgba(56, 189, 248, 0.8)'
-          }
+          borderWidth: 1
         },
         label: {
           show: true,
-          formatter: function(params) {
-            return params.data[2];
-          },
+          formatter: (p) => p.data[2],
           color: '#fff',
-          fontSize: 10,
-          fontWeight: 'bold'
+          fontSize: 10
         }
-      }],
-      backgroundColor: 'transparent'
-    };
+      }]
+    });
     
-    chart.setOption(option);
     charts.bubble = chart;
-    
-    console.log('气泡图生成完成');
   }
 
-  // 3. 修复时间序列图表
+  // 初始化时间图表
   function initTimeChart() {
     const chart = echarts.init(document.getElementById('timeChart'));
     
-    // 统计每月阅读数量
     const monthsMap = {};
     rawData.forEach(d => {
       if (d.readMonth) {
         const parsed = parseChineseDate(d.readMonth);
         if (parsed) {
-          const key = parsed.yearMonth; // 使用标准格式 YYYY-MM
-          monthsMap[key] = (monthsMap[key] || 0) + 1;
+          monthsMap[parsed.yearMonth] = (monthsMap[parsed.yearMonth] || 0) + 1;
         }
       }
     });
     
-    // 按时间排序
     const sortedKeys = Object.keys(monthsMap).sort();
-    const sortedValues = sortedKeys.map(k => monthsMap[k]);
-    
-    // 转换显示格式：YYYY-MM -> YYYY年MM月
-    const displayLabels = sortedKeys.map(key => {
-      const [year, month] = key.split('-');
-      return `${year}年${parseInt(month)}月`;
-    });
-    
-    console.log('时间序列数据:', sortedKeys, sortedValues);
     
     chart.setOption({
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+        backgroundColor: 'rgba(15,23,42,0.9)',
         borderColor: '#38bdf8',
-        textStyle: { color: '#fff' },
-        formatter: function(params) {
-          const data = params[0];
-          const index = data.dataIndex;
-          return `${displayLabels[index]}<br/>阅读量: ${data.value} 本`;
-        }
-      },
-      grid: {
-        left: '3%',
-        right: '4%',
-        top: '10%',
-        bottom: '10%',
-        containLabel: true
+        textStyle: { color: '#fff' }
       },
       xAxis: {
         type: 'category',
-        data: displayLabels,
-        axisLabel: {
-          color: '#64748b',
-          fontSize: 11,
-          rotate: 45
-        },
-        axisLine: {
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.1)'
-          }
-        }
+        data: sortedKeys.map(key => {
+          const [year, month] = key.split('-');
+          return `${year}年${parseInt(month)}月`;
+        }),
+        axisLabel: { color: '#64748b', rotate: 45 }
       },
       yAxis: {
         type: 'value',
-        splitLine: {
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.05)'
-          }
-        },
-        axisLabel: {
-          color: '#64748b'
-        },
-        name: '阅读量',
-        nameTextStyle: {
-          color: '#94a3b8'
-        }
+        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } },
+        axisLabel: { color: '#64748b' }
       },
       series: [{
-        data: sortedValues,
+        data: sortedKeys.map(k => monthsMap[k]),
         type: 'line',
         smooth: true,
-        symbol: 'circle',
-        symbolSize: 6,
-        itemStyle: {
-          color: '#38bdf8'
-        },
-        lineStyle: {
-          width: 3,
-          shadowBlur: 10,
-          shadowColor: 'rgba(56, 189, 248, 0.5)'
-        },
+        itemStyle: { color: '#38bdf8' },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(56, 189, 248, 0.5)' },
+            { offset: 0, color: 'rgba(56,189,248,0.3)' },
             { offset: 1, color: 'transparent' }
           ])
-        },
-        emphasis: {
-          itemStyle: {
-            color: '#fff',
-            borderColor: '#38bdf8',
-            borderWidth: 2
-          }
         }
       }]
     });
@@ -485,210 +278,58 @@
     charts.time = chart;
   }
 
-  // 4. 还原维度引力格式
+  // 初始化主题图表
   function initThemeChart() {
     const chart = echarts.init(document.getElementById('themeChart'));
     const themes = {};
     
-    // 统计主题数量
     rawData.forEach(d => {
       if (d.theme) {
-        // 分割主题（支持多种分隔符）
-        const themeList = d.theme.split(/[\/／,，、]/);
-        themeList.forEach(t => {
+        d.theme.split(/[\/／,，、]/).forEach(t => {
           const trimmed = t.trim();
-          if (trimmed) {
-            themes[trimmed] = (themes[trimmed] || 0) + 1;
-          }
+          if (trimmed) themes[trimmed] = (themes[trimmed] || 0) + 1;
         });
       }
     });
     
-    // 转换为数组并排序
-    const themeArray = Object.entries(themes).map(([name, value]) => ({ name, value }));
-    themeArray.sort((a, b) => b.value - a.value);
-    
-    // 取前8个主题
-    const topThemes = themeArray.slice(0, 8);
-    
-    console.log('主题数据:', topThemes);
-    
-    // 生成颜色
-    const colors = [
-      '#38bdf8', '#3b82f6', '#6366f1', '#8b5cf6',
-      '#a855f7', '#d946ef', '#ec4899', '#f43f5e'
-    ];
+    const data = Object.entries(themes).map(([name, value]) => ({ name, value }))
+      .sort((a,b) => b.value - a.value).slice(0, 8);
     
     chart.setOption({
-      tooltip: {
-        trigger: 'item',
-        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-        borderColor: '#38bdf8',
-        textStyle: { color: '#fff' },
-        formatter: '{a} <br/>{b}: {c} ({d}%)'
-      },
-      legend: {
-        type: 'scroll',
-        orient: 'vertical',
-        right: 10,
-        top: 'center',
-        textStyle: {
-          color: '#94a3b8',
-          fontSize: 11
-        },
-        pageTextStyle: {
-          color: '#94a3b8'
-        }
-      },
       series: [{
-        name: '主题分布',
         type: 'pie',
         radius: ['20%', '75%'],
-        center: ['35%', '50%'],
         roseType: 'radius',
-        itemStyle: {
-          borderRadius: 8,
-          borderColor: 'var(--bg-color)',
-          borderWidth: 2
-        },
-        label: {
-          color: '#94a3b8',
-          fontSize: 11,
-          formatter: '{b}: {c}'
-        },
-        labelLine: {
-          lineStyle: {
-            color: 'rgba(255, 255, 255, 0.2)'
-          }
-        },
-        data: topThemes.map((item, index) => ({
-          ...item,
-          itemStyle: {
-            color: colors[index % colors.length]
-          }
-        })),
-        emphasis: {
-          itemStyle: {
-            shadowBlur: 10,
-            shadowOffsetX: 0,
-            shadowColor: 'rgba(0, 0, 0, 0.5)'
-          }
-        }
+        data: data,
+        label: { color: '#94a3b8', formatter: '{b}' }
       }]
     });
     
     charts.theme = chart;
   }
 
-  // 5. 刷新所有数据和图表
+  // 刷新所有数据
   function refreshAll() {
-    try {
-      const selectedYear = document.getElementById('yearSelect').value;
-      console.log('刷新数据，选中年份:', selectedYear);
-      
-      // 更新统计数据
-      const totalBooks = rawData.length;
-      const yearBooks = rawData.filter(d => {
-        if (!d.readMonth) return false;
-        const parsed = parseChineseDate(d.readMonth);
-        return parsed && parsed.year === selectedYear;
-      }).length;
-      
-      // 计算不重复作者数
-      const authorsSet = new Set();
-      rawData.forEach(d => {
-        if (d.author && d.author.trim()) {
-          authorsSet.add(d.author.trim());
-        }
-      });
-      const uniqueAuthors = authorsSet.size;
-      
-      // 更新DOM
-      document.getElementById('t-all').innerText = totalBooks;
-      document.getElementById('t-year').innerText = yearBooks;
-      document.getElementById('t-auth').innerText = uniqueAuthors;
-      
-      console.log('统计更新完成:', {
-        总藏书: totalBooks,
-        年度阅读: yearBooks,
-        不重复作者: uniqueAuthors
-      });
-      
-      // 重新初始化气泡图
-      initBubbleChart();
-      
-    } catch (error) {
-      console.error('刷新数据时出错:', error);
-    }
+    const y = document.getElementById('yearSelect').value;
+    
+    document.getElementById('t-all').innerText = rawData.length;
+    document.getElementById('t-year').innerText = rawData.filter(d => {
+      if (!d.readMonth) return false;
+      const parsed = parseChineseDate(d.readMonth);
+      return parsed && parsed.year === y;
+    }).length;
+    document.getElementById('t-auth').innerText = new Set(rawData.map(d => d.author)).size;
+    
+    initBubbleChart();
   }
 
-  // 6. 窗口大小调整处理
-  function handleResize() {
-    Object.values(charts).forEach(chart => {
-      if (chart && chart.resize) {
-        try {
-          chart.resize();
-        } catch (e) {
-          console.error('调整图表大小时出错:', e);
-        }
-      }
-    });
-  }
-
-  // 7. 页面加载初始化
-  window.onload = function() {
-    try {
-      console.log('页面初始化开始...');
-      console.log('原始数据量:', rawData.length);
-      
-      if (rawData.length > 0) {
-        console.log('第一条数据样本:', rawData[0]);
-        // 测试日期解析
-        const testDate = rawData[0].readMonth;
-        console.log('测试日期解析:', testDate, '->', parseChineseDate(testDate));
-      }
-      
-      // 初始化年份选择器
-      initYearSelector();
-      
-      // 初始化图表
-      initTimeChart();
-      initThemeChart();
-      initBubbleChart();
-      
-      // 更新统计数据
-      refreshAll();
-      
-      // 绑定窗口调整事件
-      window.addEventListener('resize', handleResize);
-      
-      console.log('页面初始化完成');
-      
-    } catch (error) {
-      console.error('页面初始化失败:', error);
-      
-      // 显示错误信息
-      const errorDiv = document.createElement('div');
-      errorDiv.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(239, 68, 68, 0.9);
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        z-index: 1000;
-        text-align: center;
-        max-width: 80%;
-      `;
-      errorDiv.innerHTML = `
-        <h3>初始化失败</h3>
-        <p>${error.message}</p>
-        <p>请检查控制台获取详细信息</p>
-      `;
-      document.body.appendChild(errorDiv);
-    }
+  // 页面初始化
+  window.onload = () => {
+    initYearSelector();
+    initTimeChart();
+    initThemeChart();
+    refreshAll();
+    window.onresize = () => Object.values(charts).forEach(c => c.resize());
   };
 </script>
 </body>
